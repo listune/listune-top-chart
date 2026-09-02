@@ -14,7 +14,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata = {
-  title: 'Listune Top Chart — Spotify Chart Developer API & Explorer',
+  title: 'Listune Top Chart Spotify Chart Developer API & Explorer',
   description: 'High-performance JSON API for Spotify top daily charts scraped from Kworb with token-free metadata resolution and Drizzle ORM.',
   keywords: 'spotify api, kworb top chart, spotify streams api, music chart api, listune api',
   icons: {

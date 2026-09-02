@@ -8,12 +8,12 @@ Listune Top Chart is a **JSON-only API service** built with Next.js that scrapes
 
 ### Key Features
 
-- **Top Daily Tracks** — Scraped from Kworb.net for 20+ countries + global
-- **Token-Free Metadata Enrichment** — Direct Spotify Track ID extraction with official Spotify oEmbed cover art resolution (100% free, 0 rate limits, no API keys needed)
-- **Multi-Dialect Database** — Powered by **Drizzle ORM** with automatic dialect support for **MySQL**, **PostgreSQL**, and **SQLite**
-- **Historical Data & Deltas** — Daily snapshots with computed rank changes (`rankDelta`, `previousRank`)
-- **Multi-Country Support** — Global + 19 country-specific charts
-- **Auto-Refresh Cron** — Automated data refresh via GitHub Actions or manual trigger endpoint
+- **Top Daily Tracks**  Scraped from Kworb.net for 20+ countries + global
+- **Token-Free Metadata Enrichment**  Direct Spotify Track ID extraction with official Spotify oEmbed cover art resolution (100% free, 0 rate limits, no API keys needed)
+- **Multi-Dialect Database**  Powered by **Drizzle ORM** with automatic dialect support for **MySQL**, **PostgreSQL**, and **SQLite**
+- **Historical Data & Deltas**  Daily snapshots with computed rank changes (`rankDelta`, `previousRank`)
+- **Multi-Country Support**  Global + 19 country-specific charts
+- **Auto-Refresh Cron**  Automated data refresh via GitHub Actions or manual trigger endpoint
 
 ---
 
@@ -60,7 +60,7 @@ Edit `.env` according to your database:
 
 ```env
 # ==============================================================================
-# Listune Top Chart — Environment Configuration
+# Listune Top Chart  Environment Configuration
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -168,8 +168,8 @@ npm run start:prod
 #### `/api/stats/tracks/history`
 | Param | Default | Description |
 |-------|---------|-------------|
-| `trackName` | — | Track name (required) |
-| `artistName` | — | Artist name (required) |
+| `trackName` |  | Track name (required) |
+| `artistName` |  | Artist name (required) |
 | `country` | `global` | Country code |
 | `days` | `30` | Number of days of history |
 
