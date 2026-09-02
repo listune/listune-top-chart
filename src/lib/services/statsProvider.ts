@@ -1,4 +1,4 @@
-import { prisma } from '../db';
+import { trackSnapshotRepo, trackCurrentRepo } from '../db';
 import { scrapeKworbGlobalDailyTracks } from '../scraping/kworbTracks';
 import { scrapeKworbIndonesiaDailyTracks } from '../scraping/kworbIndonesia';
 import { scrapeKworbCountryDailyTracks, getCountriesToScrape } from '../scraping/kworbCountry';
@@ -62,16 +62,16 @@ class SpotifyStatsProviderImpl implements SpotifyStatsProvider {
    * Stores track snapshots in the database
    */
   private async storeTrackSnapshots(tracks: Array<{ trackName: string; artistName: string; rank: number; dailyStreams: number; totalStreams?: number }>, country: string = 'global'): Promise<void> {
-    await prisma.trackSnapshot.createMany({
-      data: tracks.map(t => ({
+    await trackSnapshotRepo.createMany(
+      tracks.map(t => ({
         trackName: t.trackName,
         artistName: t.artistName,
         country,
         rank: t.rank,
         dailyStreams: BigInt(t.dailyStreams),
         totalStreams: t.totalStreams ? BigInt(t.totalStreams) : null,
-      })),
-    });
+      }))
+    );
   }
 
   /**
@@ -81,27 +81,13 @@ class SpotifyStatsProviderImpl implements SpotifyStatsProvider {
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
 
-    const previousDaySnapshot = await prisma.trackSnapshot.findFirst({
-      where: {
-        trackName,
-        artistName,
-        country,
-        createdAt: {
-          lt: todayStart,
-        },
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
-
-    return previousDaySnapshot ? { rank: previousDaySnapshot.rank } : null;
+    return await trackSnapshotRepo.findBaseline(trackName, artistName, country, todayStart);
   }
 
   /**
    * Updates track current stats, computing rank deltas and enriching with Spotify metadata
    */
-  private async updateTrackCurrents(tracks: Array<{ trackName: string; artistName: string; rank: number; dailyStreams: number; totalStreams?: number }>, country: string = 'global'): Promise<void> {
+  private async updateTrackCurrents(tracks: Array<{ trackName: string; artistName: string; rank: number; dailyStreams: number; totalStreams?: number; trackId?: string; spotifyUrl?: string }>, country: string = 'global'): Promise<void> {
     const startTime = new Date();
     for (const track of tracks) {
       const dailyBaseline = await this.getDailyBaselineTrackSnapshot(track.trackName, track.artistName, country);
@@ -109,83 +95,46 @@ class SpotifyStatsProviderImpl implements SpotifyStatsProvider {
       const rankDelta = previousRank !== null ? track.rank - previousRank : null;
 
       // Get existing current record to check if we need to enrich metadata
-      const existing = await prisma.trackCurrent.findUnique({
-        where: {
-          trackName_artistName_country: {
-            trackName: track.trackName,
-            artistName: track.artistName,
-            country,
-          },
-        },
-      });
+      const existing = await trackCurrentRepo.findUnique(track.trackName, track.artistName, country);
 
-      let trackId = existing?.trackId ?? null;
+      let trackId = existing?.trackId ?? track.trackId ?? null;
       let imageUrl = existing?.imageUrl ?? null;
       let previewUrl = existing?.previewUrl ?? null;
-      let spotifyUrl = existing?.spotifyUrl ?? null;
+      let spotifyUrl = existing?.spotifyUrl ?? track.spotifyUrl ?? (trackId ? `https://open.spotify.com/track/${trackId}` : null);
 
-      // Enrich with Spotify metadata if not already done
-      if (!trackId) {
-        console.log(`Enriching metadata for track: ${track.trackName} by ${track.artistName}`);
-        const metadata = await resolveTrackMetadata(track.trackName, track.artistName);
+      // Enrich with Spotify cover art / metadata if not already available
+      if (!imageUrl || !trackId) {
+        const metadata = await resolveTrackMetadata(track.trackName, track.artistName, trackId ?? track.trackId);
         if (metadata) {
-          trackId = metadata.spotifyId;
-          imageUrl = metadata.imageUrl ?? null;
-          previewUrl = metadata.previewUrl ?? null;
-          spotifyUrl = metadata.url ?? null;
+          trackId = metadata.spotifyId || trackId;
+          imageUrl = metadata.imageUrl ?? imageUrl;
+          previewUrl = metadata.previewUrl ?? previewUrl;
+          spotifyUrl = metadata.url ?? spotifyUrl;
         }
-        await new Promise(resolve => setTimeout(resolve, 100));
       }
 
       // Upsert current record
-      await prisma.trackCurrent.upsert({
-        where: {
-          trackName_artistName_country: {
-            trackName: track.trackName,
-            artistName: track.artistName,
-            country,
-          },
-        },
-        update: {
-          rank: track.rank,
-          previousRank,
-          rankDelta,
-          dailyStreams: BigInt(track.dailyStreams),
-          totalStreams: track.totalStreams ? BigInt(track.totalStreams) : null,
-          trackId: trackId ?? undefined,
-          imageUrl: imageUrl ?? undefined,
-          previewUrl: previewUrl,
-          spotifyUrl: spotifyUrl ?? undefined,
-          lastUpdated: new Date(),
-        },
-        create: {
-          trackName: track.trackName,
-          artistName: track.artistName,
-          country,
-          rank: track.rank,
-          previousRank,
-          rankDelta,
-          dailyStreams: BigInt(track.dailyStreams),
-          totalStreams: track.totalStreams ? BigInt(track.totalStreams) : null,
-          trackId: trackId ?? null,
-          imageUrl: imageUrl ?? null,
-          previewUrl: previewUrl ?? null,
-          spotifyUrl: spotifyUrl ?? null,
-        },
+      await trackCurrentRepo.upsert({
+        trackName: track.trackName,
+        artistName: track.artistName,
+        country,
+        rank: track.rank,
+        previousRank,
+        rankDelta,
+        dailyStreams: BigInt(track.dailyStreams),
+        totalStreams: track.totalStreams ? BigInt(track.totalStreams) : null,
+        trackId: trackId ?? null,
+        imageUrl: imageUrl ?? null,
+        previewUrl: previewUrl ?? null,
+        spotifyUrl: spotifyUrl ?? null,
+        lastUpdated: new Date(),
       });
     }
 
     // CLEANUP: Remove stale tracks
     console.log(`Cleaning up stale tracks for ${country}...`);
-    const cleanupResult = await prisma.trackCurrent.deleteMany({
-      where: {
-        country,
-        lastUpdated: {
-          lt: startTime,
-        },
-      },
-    });
-    console.log(`Deleted ${cleanupResult.count} stale tracks in ${country}`);
+    const deletedCount = await trackCurrentRepo.deleteStale(country, startTime);
+    console.log(`Deleted ${deletedCount} stale tracks in ${country}`);
   }
 
   /**
@@ -194,41 +143,21 @@ class SpotifyStatsProviderImpl implements SpotifyStatsProvider {
   private async cleanupInvalidTracks(country: string = 'global'): Promise<void> {
     console.log(`Cleaning up invalid tracks for ${country}...`);
 
-    const invalidTracks = await prisma.trackCurrent.findMany({
-      where: {
-        country,
-        dailyStreams: {
-          lt: BigInt(100000),
-        },
-      },
+    const invalidTracks = await trackCurrentRepo.findMany({
+      country,
+      dailyStreamsLt: BigInt(100000),
     });
 
     if (invalidTracks.length > 0) {
       console.log(`Found ${invalidTracks.length} tracks with suspiciously small daily streams`);
 
-      await prisma.trackCurrent.deleteMany({
-        where: {
-          country,
-          dailyStreams: {
-            lt: BigInt(100000),
-          },
-        },
-      });
-
       for (const track of invalidTracks) {
-        await prisma.trackSnapshot.deleteMany({
-          where: {
-            trackName: track.trackName,
-            artistName: track.artistName,
-            country,
-          },
-        });
+        await trackCurrentRepo.deleteByTrack(track.trackName, track.artistName, country);
+        await trackSnapshotRepo.deleteByTrack(track.trackName, track.artistName, country);
       }
     }
 
-    const allTracks = await prisma.trackCurrent.findMany({
-      where: { country },
-    });
+    const allTracks = await trackCurrentRepo.findMany({ country });
 
     const tracksToDelete = allTracks.filter(track => {
       const trackName = track.trackName.trim();
@@ -244,21 +173,8 @@ class SpotifyStatsProviderImpl implements SpotifyStatsProvider {
       console.log(`Found ${tracksToDelete.length} tracks with invalid names`);
 
       for (const track of tracksToDelete) {
-        await prisma.trackCurrent.deleteMany({
-          where: {
-            trackName: track.trackName,
-            artistName: track.artistName,
-            country,
-          },
-        });
-
-        await prisma.trackSnapshot.deleteMany({
-          where: {
-            trackName: track.trackName,
-            artistName: track.artistName,
-            country,
-          },
-        });
+        await trackCurrentRepo.deleteByTrack(track.trackName, track.artistName, country);
+        await trackSnapshotRepo.deleteByTrack(track.trackName, track.artistName, country);
       }
     }
 
@@ -269,25 +185,25 @@ class SpotifyStatsProviderImpl implements SpotifyStatsProvider {
    * Gets top tracks from the database
    */
   async getTopTracks(limit: number = parseInt(process.env.TOP_TRACKS_LIMIT || '25', 10), country: string = 'global'): Promise<TrackStat[]> {
-    const tracks = await prisma.trackCurrent.findMany({
-      where: { country },
-      orderBy: { rank: 'asc' },
-      take: limit,
+    const tracks = await trackCurrentRepo.findMany({
+      country,
+      limit,
+      orderByRank: true,
     });
 
     return tracks.map(t => ({
-      trackId: t.trackId,
+      trackId: t.trackId ?? null,
       name: t.trackName,
       mainArtistName: t.artistName,
       rank: t.rank,
-      previousRank: t.previousRank,
-      rankDelta: t.rankDelta,
+      previousRank: t.previousRank ?? null,
+      rankDelta: t.rankDelta ?? null,
       dailyStreams: Number(t.dailyStreams),
-      totalStreams: t.totalStreams ? Number(t.totalStreams) : undefined,
+      totalStreams: t.totalStreams ? Number(t.totalStreams) : null,
       imageUrl: t.imageUrl ?? undefined,
-      previewUrl: t.previewUrl ?? undefined,
+      previewUrl: t.previewUrl ?? null,
       spotifyUrl: t.spotifyUrl ?? undefined,
-      lastUpdated: t.lastUpdated,
+      lastUpdated: t.lastUpdated ?? new Date(),
     }));
   }
 }

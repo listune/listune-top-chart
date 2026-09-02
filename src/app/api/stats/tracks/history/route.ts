@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
+import { trackSnapshotRepo } from '@/lib/db';
 
 // Force dynamic rendering since we use request.url
 export const dynamic = 'force-dynamic';
@@ -24,19 +24,7 @@ export async function GET(request: Request) {
     startDate.setDate(startDate.getDate() - days);
     
     // Fetch snapshots for this track
-    const snapshots = await prisma.trackSnapshot.findMany({
-      where: {
-        trackName,
-        artistName,
-        country,
-        createdAt: {
-          gte: startDate,
-        },
-      },
-      orderBy: {
-        createdAt: 'asc',
-      },
-    });
+    const snapshots = await trackSnapshotRepo.findHistory(trackName, artistName, country, startDate);
     
     // Transform data for charts
     const chartData = snapshots.map(snapshot => ({

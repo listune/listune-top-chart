@@ -1,15 +1,12 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
+import { trackCurrentRepo } from '@/lib/db';
 
 // Force dynamic rendering since we query the database
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const latestTrack = await prisma.trackCurrent.findFirst({
-      orderBy: { lastUpdated: 'desc' },
-      select: { lastUpdated: true },
-    });
+    const latestTrack = await trackCurrentRepo.findLatestUpdated();
     
     return NextResponse.json({ 
       lastUpdated: latestTrack?.lastUpdated?.toISOString() || null,

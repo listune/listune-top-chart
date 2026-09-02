@@ -4,11 +4,8 @@ const nextConfig = {
   reactStrictMode: true,
   env: {
     DATABASE_URL: process.env.DATABASE_URL,
-    SPOTIFY_CLIENT_ID: process.env.SPOTIFY_CLIENT_ID,
-    SPOTIFY_CLIENT_SECRET: process.env.SPOTIFY_CLIENT_SECRET,
     ADMIN_SECRET: process.env.ADMIN_SECRET,
   },
-
 
   webpack: (config, { isServer }) => {
     if (isServer) {

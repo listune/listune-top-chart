@@ -19,6 +19,8 @@ export interface TrackStatRaw {
   rank: number;
   dailyStreams: number;
   totalStreams?: number;
+  trackId?: string;
+  spotifyUrl?: string;
 }
 
 // Historical data types for charts

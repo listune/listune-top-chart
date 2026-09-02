@@ -1,57 +1,75 @@
-# dependencies
+# Dependencies
 /node_modules
 /.pnp
 .pnp.js
+.yarn/install-state.gz
 
-# testing
-/coverage
-
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
-.DS_Store
-*.pem
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# local env files
+# Environment & Sensitive Files
 .env
 .env*.local
+.env.development
+.env.test
+.env.production
+!.env.example
+*.pem
+*.key
+*.cert
+*.crt
+credentials.json
+service-account*.json
 
-# vercel
-.vercel
+# Local Databases (SQLite / LibSQL)
+*.db
+*.db-journal
+*.sqlite
+*.sqlite-journal
+*.sqlite3
+dev.db
+local.db
 
-# typescript
+# Production & Build Outputs
+/.next/
+/out/
+/build
+/dist
+/coverage
 *.tsbuildinfo
 next-env.d.ts
 
-# prisma
-/prisma/*.db
-/prisma/*.db-journal
-/prisma/migrations/
-migration_lock.toml
-.codersinflow
-.vscode
-.venv
-.codex
-out
-dist
-*.vsix
-.claude
-CLAUDE.md
-.git
+# Logs & Temporary Files
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+cron-log.txt
 *.tmp
-__pycache__
-*.pyc
-.env.local
-.next
+*.tmp.*
 
+# IDE, OS & Editor configs
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# AI Tools & Agent artifacts
+.gemini/
+.agents/
+.claude/
+.codex/
+.codersinflow/
+.venv/
+__pycache__/
+*.pyc
+*.vsix
+CLAUDE.md
+wkwkw.txt
+
+# Vercel
+.vercel

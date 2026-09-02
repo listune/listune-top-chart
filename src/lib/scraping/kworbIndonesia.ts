@@ -60,6 +60,18 @@ export async function scrapeKworbIndonesiaDailyTracks(): Promise<TrackStatRaw[]>
           totalStreams = parseNumber(totalText) || undefined;
         }
         
+        const artistTitleCell = $(cells[2]);
+        const trackLink = artistTitleCell.find('a[href*="/track/"]').attr('href');
+        let trackId: string | undefined;
+        let spotifyUrl: string | undefined;
+        if (trackLink) {
+          const match = trackLink.match(/\/track\/([a-zA-Z0-9]+)/);
+          if (match) {
+            trackId = match[1];
+            spotifyUrl = `https://open.spotify.com/track/${trackId}`;
+          }
+        }
+
         if (!trackName || !artistName) return;
         
         tracks.push({
@@ -68,6 +80,8 @@ export async function scrapeKworbIndonesiaDailyTracks(): Promise<TrackStatRaw[]>
           rank,
           dailyStreams,
           totalStreams,
+          trackId,
+          spotifyUrl,
         });
       }
     });

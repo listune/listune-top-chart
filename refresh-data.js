@@ -6,12 +6,11 @@
  * 
  * Required env vars:
  * - DATABASE_URL (MySQL/PostgreSQL/SQLite connection string)
- * - SPOTIFY_CLIENT_ID
- * - SPOTIFY_CLIENT_SECRET
  * - SCRAPE_COUNTRIES (optional, defaults to "global,id")
  * - TOP_TRACKS_LIMIT (optional, defaults to 25)
  */
 
+require('dotenv').config();
 const { execSync } = require('child_process');
 
 // Use tsx to run TypeScript directly

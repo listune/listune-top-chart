@@ -101,13 +101,25 @@ export async function scrapeKworbCountryDailyTracks(countryCode: string): Promis
       if (seenRanks.has(rank)) return;
       seenRanks.add(rank);
 
+      const artistTitleCell = $(cells[2]);
+      const trackLink = artistTitleCell.find('a[href*="/track/"]').attr('href');
+      let trackId: string | undefined;
+      let spotifyUrl: string | undefined;
+      if (trackLink) {
+        const match = trackLink.match(/\/track\/([a-zA-Z0-9]+)/);
+        if (match) {
+          trackId = match[1];
+          spotifyUrl = `https://open.spotify.com/track/${trackId}`;
+        }
+      }
+
       let totalStreams: number | undefined;
       if (cells.length >= 11) {
         const totalText = $(cells[10]).text().trim();
         totalStreams = parseNumber(totalText) || undefined;
       }
 
-      tracks.push({ trackName, artistName, rank, dailyStreams, totalStreams });
+      tracks.push({ trackName, artistName, rank, dailyStreams, totalStreams, trackId, spotifyUrl });
     });
 
     tracks.sort((a, b) => a.rank - b.rank);

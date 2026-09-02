@@ -3,12 +3,8 @@
  * Called by refresh-data.js via tsx.
  */
 
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
-
-// --- Inline scraping functions (no 'server-only' import needed) ---
-
+import 'dotenv/config';
+import { trackSnapshotRepo, trackCurrentRepo, closeDbConnection } from './src/lib/db';
 import * as cheerio from 'cheerio';
 
 const FETCH_HEADERS = {
@@ -21,6 +17,8 @@ interface TrackRaw {
   rank: number;
   dailyStreams: number;
   totalStreams?: number;
+  trackId?: string;
+  spotifyUrl?: string;
 }
 
 function parseNumber(text: string): number {
@@ -73,12 +71,24 @@ async function scrapeKworbDailyTracks(countryCode: string): Promise<TrackRaw[]> 
     if (seenRanks.has(rank)) return;
     seenRanks.add(rank);
 
+    const artistTitleCell = $(cells[2]);
+    const trackLink = artistTitleCell.find('a[href*="/track/"]').attr('href');
+    let trackId: string | undefined;
+    let spotifyUrl: string | undefined;
+    if (trackLink) {
+      const match = trackLink.match(/\/track\/([a-zA-Z0-9]+)/);
+      if (match) {
+        trackId = match[1];
+        spotifyUrl = `https://open.spotify.com/track/${trackId}`;
+      }
+    }
+
     let totalStreams: number | undefined;
     if (cells.length >= 11) {
       totalStreams = parseNumber($(cells[10]).text().trim()) || undefined;
     }
 
-    tracks.push({ trackName, artistName, rank, dailyStreams, totalStreams });
+    tracks.push({ trackName, artistName, rank, dailyStreams, totalStreams, trackId, spotifyUrl });
   });
 
   tracks.sort((a, b) => a.rank - b.rank);
@@ -86,26 +96,7 @@ async function scrapeKworbDailyTracks(countryCode: string): Promise<TrackRaw[]> 
   return tracks.slice(0, limit);
 }
 
-// --- Spotify metadata resolution ---
-
-async function getSpotifyToken(): Promise<string | null> {
-  const clientId = process.env.SPOTIFY_CLIENT_ID;
-  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
-  if (!clientId || !clientSecret) return null;
-
-  const res = await fetch('https://accounts.spotify.com/api/token', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Authorization': 'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64'),
-    },
-    body: 'grant_type=client_credentials',
-  });
-
-  if (!res.ok) return null;
-  const data = await res.json();
-  return data.access_token;
-}
+// --- Spotify metadata resolution via oEmbed (100% token-free & no rate-limits) ---
 
 interface TrackMeta {
   spotifyId: string;
@@ -114,21 +105,24 @@ interface TrackMeta {
   url?: string;
 }
 
-async function resolveTrack(trackName: string, artistName: string, token: string): Promise<TrackMeta | null> {
-  const query = encodeURIComponent(`track:${trackName} artist:${artistName}`);
-  const res = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
-    headers: { 'Authorization': `Bearer ${token}` },
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
-  const track = data.tracks?.items?.[0];
-  if (!track) return null;
-  return {
-    spotifyId: track.id,
-    imageUrl: track.album?.images?.[0]?.url,
-    previewUrl: track.preview_url,
-    url: track.external_urls?.spotify,
-  };
+async function resolveTrack(knownTrackId: string): Promise<TrackMeta | null> {
+  try {
+    const url = `https://open.spotify.com/track/${knownTrackId}`;
+    const res = await fetch(`https://open.spotify.com/oembed?url=${encodeURIComponent(url)}`, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) TopChart/1.0' },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return {
+        spotifyId: knownTrackId,
+        imageUrl: data.thumbnail_url || undefined,
+        url,
+      };
+    }
+    return { spotifyId: knownTrackId, url };
+  } catch {
+    return { spotifyId: knownTrackId, url: `https://open.spotify.com/track/${knownTrackId}` };
+  }
 }
 
 // --- Countries config ---
@@ -145,11 +139,6 @@ async function refreshAllStats() {
   const countries = getCountriesToScrape();
   console.log(`Scraping ${countries.length} countries: ${countries.join(', ')}`);
 
-  const spotifyToken = await getSpotifyToken();
-  if (!spotifyToken) {
-    console.warn('⚠️  No Spotify token available, tracks will not be enriched with metadata');
-  }
-
   for (const country of countries) {
     console.log(`\n--- Scraping ${country} tracks ---`);
     
@@ -158,16 +147,16 @@ async function refreshAllStats() {
       console.log(`Scraped ${tracks.length} tracks`);
 
       // Store snapshots
-      await prisma.trackSnapshot.createMany({
-        data: tracks.map(t => ({
+      await trackSnapshotRepo.createMany(
+        tracks.map(t => ({
           trackName: t.trackName,
           artistName: t.artistName,
           country,
           rank: t.rank,
           dailyStreams: BigInt(t.dailyStreams),
           totalStreams: t.totalStreams ? BigInt(t.totalStreams) : null,
-        })),
-      });
+        }))
+      );
 
       // Process each track
       const startTime = new Date();
@@ -175,62 +164,50 @@ async function refreshAllStats() {
         // Get daily baseline
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
-        const baseline = await prisma.trackSnapshot.findFirst({
-          where: { trackName: track.trackName, artistName: track.artistName, country, createdAt: { lt: todayStart } },
-          orderBy: { createdAt: 'desc' },
-        });
+        const baseline = await trackSnapshotRepo.findBaseline(track.trackName, track.artistName, country, todayStart);
         const previousRank = baseline?.rank ?? null;
         const rankDelta = previousRank !== null ? track.rank - previousRank : null;
 
         // Check existing metadata
-        const existing = await prisma.trackCurrent.findUnique({
-          where: { trackName_artistName_country: { trackName: track.trackName, artistName: track.artistName, country } },
-        });
+        const existing = await trackCurrentRepo.findUnique(track.trackName, track.artistName, country);
 
-        let trackId = existing?.trackId ?? null;
+        let trackId = existing?.trackId ?? track.trackId ?? null;
         let imageUrl = existing?.imageUrl ?? null;
         let previewUrl = existing?.previewUrl ?? null;
-        let spotifyUrl = existing?.spotifyUrl ?? null;
+        let spotifyUrl = existing?.spotifyUrl ?? track.spotifyUrl ?? (trackId ? `https://open.spotify.com/track/${trackId}` : null);
 
-        // Enrich if needed
-        if (!trackId && spotifyToken) {
-          console.log(`  Enriching: ${track.trackName} by ${track.artistName}`);
-          const meta = await resolveTrack(track.trackName, track.artistName, spotifyToken);
+        // Enrich cover art if missing
+        if ((!imageUrl || !trackId) && (trackId || track.trackId)) {
+          const targetId = trackId || track.trackId!;
+          const meta = await resolveTrack(targetId);
           if (meta) {
             trackId = meta.spotifyId;
-            imageUrl = meta.imageUrl ?? null;
-            previewUrl = meta.previewUrl ?? null;
-            spotifyUrl = meta.url ?? null;
+            imageUrl = meta.imageUrl ?? imageUrl;
+            spotifyUrl = meta.url ?? spotifyUrl;
           }
-          await new Promise(r => setTimeout(r, 100));
         }
 
         // Upsert
-        await prisma.trackCurrent.upsert({
-          where: { trackName_artistName_country: { trackName: track.trackName, artistName: track.artistName, country } },
-          update: {
-            rank: track.rank, previousRank, rankDelta,
-            dailyStreams: BigInt(track.dailyStreams),
-            totalStreams: track.totalStreams ? BigInt(track.totalStreams) : null,
-            trackId: trackId ?? undefined, imageUrl: imageUrl ?? undefined,
-            previewUrl, spotifyUrl: spotifyUrl ?? undefined,
-            lastUpdated: new Date(),
-          },
-          create: {
-            trackName: track.trackName, artistName: track.artistName, country,
-            rank: track.rank, previousRank, rankDelta,
-            dailyStreams: BigInt(track.dailyStreams),
-            totalStreams: track.totalStreams ? BigInt(track.totalStreams) : null,
-            trackId, imageUrl, previewUrl: previewUrl ?? null, spotifyUrl,
-          },
+        await trackCurrentRepo.upsert({
+          trackName: track.trackName,
+          artistName: track.artistName,
+          country,
+          rank: track.rank,
+          previousRank,
+          rankDelta,
+          dailyStreams: BigInt(track.dailyStreams),
+          totalStreams: track.totalStreams ? BigInt(track.totalStreams) : null,
+          trackId: trackId ?? null,
+          imageUrl: imageUrl ?? null,
+          previewUrl: previewUrl ?? null,
+          spotifyUrl: spotifyUrl ?? null,
+          lastUpdated: new Date(),
         });
       }
 
       // Cleanup stale
-      const deleted = await prisma.trackCurrent.deleteMany({
-        where: { country, lastUpdated: { lt: startTime } },
-      });
-      if (deleted.count > 0) console.log(`  Cleaned up ${deleted.count} stale tracks`);
+      const deletedCount = await trackCurrentRepo.deleteStale(country, startTime);
+      if (deletedCount > 0) console.log(`  Cleaned up ${deletedCount} stale tracks`);
 
       console.log(`✅ ${country} done`);
     } catch (error) {
@@ -249,4 +226,4 @@ refreshAllStats()
     console.error('Fatal error:', err);
     process.exit(1);
   })
-  .finally(() => prisma.$disconnect());
+  .finally(() => closeDbConnection());

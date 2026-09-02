@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/db';
+import { testDbConnection, getDatabaseDialect } from '@/lib/db';
 import { NextResponse } from 'next/server';
 
 // Test endpoint to diagnose database connection issues
@@ -6,9 +6,11 @@ import { NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
+  const dialect = getDatabaseDialect();
   const diagnostics: any = {
     timestamp: new Date().toISOString(),
     hasDatabaseUrl: !!process.env.DATABASE_URL,
+    dialect,
     databaseUrlPrefix: process.env.DATABASE_URL 
       ? process.env.DATABASE_URL.substring(0, 30) + '...' 
       : 'NOT SET',
@@ -24,79 +26,33 @@ export async function GET() {
     }, { status: 500 });
   }
 
-  // Check connection string format
-  const dbUrl = process.env.DATABASE_URL;
-  const hasSslMode = dbUrl.includes('sslmode=');
-  const isNeon = dbUrl.includes('neon.tech');
-  const isPooled = dbUrl.includes('pooler') || dbUrl.includes('pgbouncer');
+  // Try to connect to database using Drizzle
+  const connResult = await testDbConnection();
 
-  diagnostics.connectionString = {
-    hasSslMode,
-    isNeon,
-    isPooled,
-    length: dbUrl.length,
-  };
-
-  // Try to connect to database
-  try {
-    // Simple connection test
-    await prisma.$queryRaw`SELECT 1 as test`;
-    
-    // Try a simple query
-    const result = await prisma.$queryRaw`SELECT version() as version`;
-    
+  if (connResult.success) {
     return NextResponse.json({
       status: 'success',
       message: 'Database connection successful',
       diagnostics: {
         ...diagnostics,
         connectionTest: 'passed',
-        databaseVersion: result,
+        databaseVersion: connResult.version,
       },
     });
-  } catch (error: any) {
-    // Enhanced error information
-    const errorDetails = {
-      message: error.message,
-      code: error.code,
-      meta: error.meta,
-      name: error.name,
-    };
-
-    // Check for common error patterns
-    let suggestions: string[] = [];
-    
-    if (error.code === 'P1001') {
-      suggestions.push('Cannot reach database server - check connection string and network');
-      suggestions.push('Verify Neon database is active in Neon console');
-      suggestions.push('Check if Hostinger allows outbound connections to *.neon.tech');
-    }
-    
-    if (error.code === 'P1000') {
-      suggestions.push('Authentication failed - check username and password in connection string');
-    }
-    
-    if (error.message?.includes('SSL') || error.message?.includes('TLS')) {
-      suggestions.push('SSL/TLS error - ensure connection string includes ?sslmode=require');
-    }
-    
-    if (!hasSslMode && isNeon) {
-      suggestions.push('Neon requires SSL - add ?sslmode=require to connection string');
-    }
-    
-    if (!isPooled && isNeon) {
-      suggestions.push('Consider using pooled connection URL from Neon for better performance');
-    }
-
-    return NextResponse.json({
-      status: 'error',
-      message: 'Database connection failed',
-      error: errorDetails,
-      diagnostics: {
-        ...diagnostics,
-        connectionTest: 'failed',
-        suggestions,
-      },
-    }, { status: 500 });
   }
+
+  const error = connResult.error || {};
+  return NextResponse.json({
+    status: 'error',
+    message: 'Database connection failed',
+    error: {
+      message: error.message || String(error),
+      code: error.code,
+      name: error.name,
+    },
+    diagnostics: {
+      ...diagnostics,
+      connectionTest: 'failed',
+    },
+  }, { status: 500 });
 }

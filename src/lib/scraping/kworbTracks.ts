@@ -164,6 +164,18 @@ export async function scrapeKworbGlobalDailyTracks(): Promise<TrackStatRaw[]> {
         totalStreams = parseNumber(totalText) || undefined;
       }
       
+      const artistTitleCell = $(cells[2]);
+      const trackLink = artistTitleCell.find('a[href*="/track/"]').attr('href');
+      let trackId: string | undefined;
+      let spotifyUrl: string | undefined;
+      if (trackLink) {
+        const match = trackLink.match(/\/track\/([a-zA-Z0-9]+)/);
+        if (match) {
+          trackId = match[1];
+          spotifyUrl = `https://open.spotify.com/track/${trackId}`;
+        }
+      }
+
       // Mark this rank as seen
       seenRanks.add(rank);
       
@@ -173,6 +185,8 @@ export async function scrapeKworbGlobalDailyTracks(): Promise<TrackStatRaw[]> {
         rank,
         dailyStreams,
         totalStreams,
+        trackId,
+        spotifyUrl,
       });
     });
     

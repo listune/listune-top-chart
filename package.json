@@ -1,34 +1,66 @@
 {
-  "name": "mewwme-top-chart",
-  "description": "Meww.me Top Chart, JSON API for Spotify top charts scraped from Kworb",
-  "version": "1.0.0",
+  "name": "listune-top-chart",
+  "version": "2.0.0",
+  "description": "Listune Top Chart - High-performance REST API and interactive analytics dashboard for Spotify daily top charts across 20+ countries.",
+  "author": {
+    "name": "L RMN",
+    "url": "https://lrmn.wtf/"
+  },
+  "license": "MIT",
+  "homepage": "https://lrmn.wtf/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lrmn7/listune-top-chart.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lrmn7/listune-top-chart/issues"
+  },
+  "keywords": [
+    "spotify",
+    "top-charts",
+    "music-api",
+    "kworb",
+    "drizzle-orm",
+    "nextjs",
+    "rest-api",
+    "music-charts",
+    "spotify-tracks"
+  ],
   "private": true,
   "scripts": {
     "dev": "dotenv -- next dev",
-    "build": "prisma generate && next build",
+    "build": "next build",
     "start": "dotenv -- next start",
     "lint": "next lint",
-    "db:push": "prisma db push",
-    "db:studio": "prisma studio"
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio",
+    "db:generate": "drizzle-kit generate",
+    "start:prod": "npm run db:generate && npm run db:push && npm run build && npm run start"
   },
   "dependencies": {
-    "@prisma/client": "^5.7.1",
+    "@libsql/client": "^0.17.4",
     "cheerio": "^1.0.0-rc.12",
     "dotenv": "^17.3.1",
+    "drizzle-orm": "^0.45.2",
+    "mysql2": "^3.24.3",
     "next": "^14.0.4",
+    "pg": "^8.23.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "safer-buffer": "^2.1.2",
     "server-only": "^0.0.1"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
     "@types/jquery": "^3.5.33",
     "@types/node": "^20.10.5",
+    "@types/pg": "^8.23.1",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
     "dotenv-cli": "^11.0.0",
+    "drizzle-kit": "^0.31.10",
     "eslint": "^8.57.0",
     "eslint-config-next": "^14.2.33",
-    "prisma": "^5.7.1",
     "tsx": "^4.21.0",
     "typescript": "^5.3.3"
   }

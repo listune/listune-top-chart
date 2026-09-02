@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
+import { trackCurrentRepo } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,10 +10,9 @@ export async function GET(request: Request) {
         const cleanup = searchParams.get('cleanup') === 'true';
 
         // --- TRACKS ---
-        const tracks = await prisma.trackCurrent.findMany({
-            where: { country },
-            select: { id: true, trackName: true, artistName: true, rank: true, lastUpdated: true },
-            orderBy: { rank: 'asc' },
+        const tracks = await trackCurrentRepo.findMany({
+            country,
+            orderByRank: true,
         });
 
         const trackDups = findDuplicates(tracks, 'trackName');
@@ -21,7 +20,8 @@ export async function GET(request: Request) {
         let deletedTracks = 0;
         if (cleanup && trackDups.length > 0) {
             console.log('Cleaning up track duplicates...');
-            deletedTracks = await deleteStaleRecords(prisma.trackCurrent, trackDups);
+            const allLoserIds = trackDups.flatMap(g => g.losers.map((l: any) => l.id));
+            deletedTracks = await trackCurrentRepo.deleteByIds(allLoserIds);
         }
 
         return NextResponse.json({
@@ -63,18 +63,4 @@ function findDuplicates(items: any[], nameField: string) {
         }
     });
     return duplicates;
-}
-
-async function deleteStaleRecords(model: any, duplicateGroups: any[]) {
-    let count = 0;
-    for (const group of duplicateGroups) {
-        const idsToDelete = group.losers.map((l: any) => l.id);
-        if (idsToDelete.length > 0) {
-            await model.deleteMany({
-                where: { id: { in: idsToDelete } }
-            });
-            count += idsToDelete.length;
-        }
-    }
-    return count;
 }

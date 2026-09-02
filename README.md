@@ -1,18 +1,19 @@
-# Meww.me Top Chart
+# Listune Top Chart
 
-> JSON API for Spotify top daily tracks data, scraped from [Kworb.net](https://kworb.net) and enriched with Spotify metadata.
+> JSON API for Spotify top daily tracks data, scraped from [Kworb.net](https://kworb.net) and enriched with official Spotify metadata.
 
 ## Overview
 
-Meww.me Top Chart is a **JSON-only API service** built with Next.js that scrapes Spotify daily track chart data from Kworb.net, enriches it with Spotify metadata (cover art, preview URL, Spotify link), and serves it through clean REST endpoints.
+Listune Top Chart is a **JSON-only API service** built with Next.js that scrapes Spotify daily track chart data from Kworb.net, enriches it with high-res album cover art and Spotify links via token-free Spotify oEmbed, and serves it through clean REST endpoints backed by **Drizzle ORM**.
 
 ### Key Features
 
-- **Top Daily Tracks**  Scraped from Kworb.net for 20 countries + global
-- **Spotify Integration**  Automatic track matching with cover art, preview URLs, and Spotify links
-- **Historical Data**  Daily snapshots with rank changes
-- **Multi-Country Support**  Global + 19 country-specific charts
-- **Auto-Refresh** Cron-based data refresh via Vercel or manual trigger
+- **Top Daily Tracks** — Scraped from Kworb.net for 20+ countries + global
+- **Token-Free Metadata Enrichment** — Direct Spotify Track ID extraction with official Spotify oEmbed cover art resolution (100% free, 0 rate limits, no API keys needed)
+- **Multi-Dialect Database** — Powered by **Drizzle ORM** with automatic dialect support for **MySQL**, **PostgreSQL**, and **SQLite**
+- **Historical Data & Deltas** — Daily snapshots with computed rank changes (`rankDelta`, `previousRank`)
+- **Multi-Country Support** — Global + 19 country-specific charts
+- **Auto-Refresh Cron** — Automated data refresh via GitHub Actions or manual trigger endpoint
 
 ---
 
@@ -22,11 +23,12 @@ Meww.me Top Chart is a **JSON-only API service** built with Next.js that scrapes
 |-----------|-----------|
 | Framework | [Next.js 14](https://nextjs.org/) (App Router) |
 | Language | TypeScript |
-| Database | MySQL (production) / PostgreSQL / SQLite (development) |
-| ORM | [Prisma](https://www.prisma.io/) |
+| Database | MySQL / PostgreSQL / SQLite |
+| ORM | [Drizzle ORM](https://orm.drizzle.team/) & [Drizzle Kit](https://orm.drizzle.team/kit-docs/overview) |
+| Drivers | `mysql2` (MySQL), `pg` (PostgreSQL), `@libsql/client` (SQLite) |
 | Scraping | [Cheerio](https://cheerio.js.org/) |
-| API Source | Spotify Web API |
-| Deployment | Vercel / Hostinger Node.js |
+| Metadata | Spotify oEmbed API (Token-Free) |
+| Deployment | Vercel / Hostinger / Node.js Server |
 
 ---
 
@@ -35,16 +37,15 @@ Meww.me Top Chart is a **JSON-only API service** built with Next.js that scrapes
 ### Prerequisites
 
 - Node.js 18+
-- npm or yarn
-- MySQL / PostgreSQL / SQLite database
-- [Spotify Developer](https://developer.spotify.com/dashboard) app credentials
+- npm or yarn / pnpm
+- MySQL, PostgreSQL, or local SQLite database
 
 ### Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/lrmn7/mewwme-top-chart.git
-cd mewwme-top-chart
+git clone https://github.com/lrmn7/listune-top-chart.git
+cd listune-top-chart
 
 # Install dependencies
 npm install
@@ -55,60 +56,91 @@ cp .env.example .env
 
 ### Environment Variables
 
-Edit `.env` with your credentials:
+Edit `.env` according to your database:
 
 ```env
-# Required
-SPOTIFY_CLIENT_ID=your_spotify_client_id
-SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
-DATABASE_URL="mysql://user:password@host:3306/database"
+# ==============================================================================
+# Listune Top Chart — Environment Configuration
+# ==============================================================================
 
-# Admin secret for triggering data refresh
-ADMIN_SECRET=your_secret_here
+# ------------------------------------------------------------------------------
+# 1. Server Configuration
+# ------------------------------------------------------------------------------
+PORT=3000
 
-# Countries to scrape (comma-separated)
-SCRAPE_COUNTRIES=global,id,us,gb,jp,kr,de,fr,br,mx,in,au,es,it,ca,se,ph,tr,ar,nl
+# ------------------------------------------------------------------------------
+# 2. Database Connection (Drizzle ORM Multi-Dialect)
+# ------------------------------------------------------------------------------
+# Listune auto-detects dialect based on your DATABASE_URL prefix:
+#
+#   • SQLite (Local / Default)    : "file:./dev.db"
+#   • PostgreSQL (Supabase, Neon) : "postgresql://user:password@host:5432/dbname"
+#   • MySQL (Hostinger, Aiven)    : "mysql://user:password@host:3306/dbname"
+#
+DATABASE_URL="file:./dev.db"
 
-# Limits
+# ------------------------------------------------------------------------------
+# 3. Security & Admin Authentication
+# ------------------------------------------------------------------------------
+# Secret key required in x-admin-secret header for POST /api/scrape-chart
+ADMIN_SECRET=your_secure_admin_secret_key_here
+
+# ------------------------------------------------------------------------------
+# 4. Data Scraper & Chart Settings
+# ------------------------------------------------------------------------------
+# Comma-separated country codes to scrape and store daily from Kworb.net.
+# Supported codes: global, id, my, us, gb, nl, jp, de, fr, br, mx, kr, in, au, es, it, ca, se, ph, tr, ar
+SCRAPE_COUNTRIES=global,id,my,us,gb,nl,jp,de,fr,br,mx,kr,in,au,es,it,ca,se,ph,tr,ar
+
+# Number of top tracks and artists to fetch per country (default: 25, max: 200)
 TOP_TRACKS_LIMIT=25
-
-# Optional: Rate limit rotation (add up to 3 Spotify client pairs)
-# SPOTIFY_CLIENT_ID_2=second_client_id
-# SPOTIFY_CLIENT_SECRET_2=second_client_secret
-
-# Server port (for custom server)
-PORT=3301
+TOP_ARTISTS_LIMIT=25
 ```
 
-### Database Setup
+> [!NOTE]
+> **No Spotify Client ID or Secret required!** Metadata and cover art are resolved automatically via Kworb Spotify URLs and official Spotify oEmbed.
 
-Three schema variants are provided:
-- `prisma/schema.prisma` — MySQL (default)
-- `prisma/schema.postgresql.prisma` — PostgreSQL
-- `prisma/schema.sqlite.prisma` — SQLite (local dev)
+---
 
-To switch database, copy the desired schema to `schema.prisma` and update `DATABASE_URL`.
+## Database Management with Drizzle ORM
+
+The system automatically detects your database type from `DATABASE_URL`:
+
+- **MySQL**: `src/lib/db/schema/mysql.ts`
+- **PostgreSQL**: `src/lib/db/schema/pg.ts`
+- **SQLite**: `src/lib/db/schema/sqlite.ts` (Auto-initializes tables & indexes on launch)
+
+### Useful Database Commands
 
 ```bash
-# Generate Prisma client
-npx prisma generate
+# Push schema directly to your database
+npm run db:push
 
-# Push schema to database
-npx prisma db push
+# Generate SQL migrations
+npm run db:generate
 
-# (Optional) Open Prisma Studio to browse data
-npx prisma studio
+# Launch Drizzle Studio web GUI
+npm run db:studio
+
+# Check data count in database
+node check-data.js
+
+# Run data refresh manually
+node refresh-data.js
 ```
 
-### Running
+### Running the App
 
 ```bash
-# Development
+# Development server
 npm run dev
 
-# Production build
+# Production build & start
 npm run build
-npm start
+npm run start
+
+# All-in-one production deploy
+npm run start:prod
 ```
 
 ---
@@ -119,53 +151,55 @@ npm start
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/stats/tracks` | Top daily tracks with streams, rank, Spotify metadata |
-| `GET` | `/api/stats/tracks/history` | Track stream/rank history |
+| `GET` | `/api/stats/tracks` | Top daily tracks with streams, rank, and Spotify metadata |
+| `GET` | `/api/stats/tracks/history` | Track stream/rank history over time |
 | `GET` | `/api/stats/countries` | List of supported countries |
 | `GET` | `/api/stats/last-updated` | Timestamp of last data refresh |
+| `GET` | `/api/test-db` | Database connection diagnostic tool |
 
 ### Query Parameters
 
 #### `/api/stats/tracks`
 | Param | Default | Description |
 |-------|---------|-------------|
-| `country` | `global` | Country code (e.g., `id`, `us`, `gb`) |
-| `limit` | `25` | Number of results |
+| `country` | `global` | Country code (e.g., `id`, `us`, `gb`, `my`) |
+| `limit` | `25` | Number of tracks to return |
 
 #### `/api/stats/tracks/history`
 | Param | Default | Description |
 |-------|---------|-------------|
-| `track` | — | Track name (required) |
-| `artist` | — | Artist name (required) |
+| `trackName` | — | Track name (required) |
+| `artistName` | — | Artist name (required) |
 | `country` | `global` | Country code |
 | `days` | `30` | Number of days of history |
 
-### Admin
+### Admin & Cron
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/cron/refresh?secret=YOUR_SECRET` | Trigger data refresh |
-| `POST` | `/api/cron/refresh` | Trigger data refresh (JSON body) |
+| `GET` | `/api/cron/refresh?secret=YOUR_ADMIN_SECRET` | Trigger data refresh via query secret |
+| `POST` | `/api/cron/refresh` | Trigger data refresh with `Bearer <ADMIN_SECRET>` header |
 
 ### Example Response
 
 ```json
-GET /api/stats/tracks?country=global&limit=2
+GET /api/stats/tracks?country=global&limit=1
 
 {
   "tracks": [
     {
-      "trackId": "2plbrEY59IikOBgBGLjaoe",
-      "name": "Die With A Smile",
-      "mainArtistName": "Lady Gaga, Bruno Mars",
+      "trackId": "3h5T5JypYU7huFiVYhv1dr",
+      "name": "BbY WOW (w/ Judeline, rusowsky)",
+      "mainArtistName": "KAROL G",
       "rank": 1,
       "previousRank": 1,
       "rankDelta": 0,
       "dailyStreams": 8500000,
       "totalStreams": 3200000000,
-      "imageUrl": "https://i.scdn.co/image/...",
-      "previewUrl": "https://p.scdn.co/mp3-preview/...",
-      "spotifyUrl": "https://open.spotify.com/track/..."
+      "imageUrl": "https://image-cdn-ak.spotifycdn.com/image/ab67616d00001e0221deb742375f88edfb2e7368",
+      "previewUrl": null,
+      "spotifyUrl": "https://open.spotify.com/track/3h5T5JypYU7huFiVYhv1dr",
+      "lastUpdated": "2026-09-02T03:00:00.000Z"
     }
   ]
 }
@@ -178,31 +212,40 @@ GET /api/stats/tracks?country=global&limit=2
 ```
 src/
 ├── app/
-│   └── api/
-│       ├── cron/refresh/         # Data refresh endpoint
-│       └── stats/
-│           ├── tracks/           # Top tracks API
-│           ├── countries/        # Supported countries
-│           └── last-updated/     # Last refresh timestamp
+│   ├── api/
+│   │   ├── cron/refresh/         # Data refresh endpoint
+│   │   ├── debug-ranks/          # Duplicate rank cleaner
+│   │   ├── test-db/              # Database health check
+│   │   └── stats/
+│   │       ├── tracks/           # Top tracks API
+│   │       │   └── history/      # Historical stream data
+│   │       ├── countries/        # Supported countries list
+│   │       └── last-updated/     # Last refresh timestamp
+│   ├── globals.css
+│   ├── layout.tsx
+│   └── page.tsx                  # Interactive API playground UI
 ├── lib/
-│   ├── db.ts                     # Prisma client singleton
+│   ├── db.ts                     # Unified multi-dialect Drizzle ORM client
+│   ├── db/
+│   │   └── schema/
+│   │       ├── mysql.ts          # MySQL Drizzle schema
+│   │       ├── pg.ts             # PostgreSQL Drizzle schema
+│   │       ├── sqlite.ts         # SQLite Drizzle schema
+│   │       └── index.ts          # Schema barrel export
 │   ├── types.ts                  # TypeScript interfaces
 │   ├── spotify/
-│   │   ├── auth.ts               # Multi-client Spotify auth with rotation
-│   │   └── metadata.ts           # Spotify metadata enrichment
+│   │   └── metadata.ts           # Token-free Spotify oEmbed metadata resolver
 │   ├── services/
-│   │   └── statsProvider.ts      # Core data aggregation service
+│   │   └── statsProvider.ts      # Core aggregation and scraping service
 │   └── scraping/
 │       ├── kworbTracks.ts        # Global top tracks scraper
 │       ├── kworbCountry.ts       # Multi-country chart scraper
-│       ├── kworbIndonesia.ts     # Indonesia-specific scraper
-│       └── kworbScraper.ts       # Base Kworb scraping utilities
-├── prisma/
-│   ├── schema.prisma             # MySQL schema (primary)
-│   ├── schema.mysql.prisma       # MySQL variant
-│   ├── schema.postgresql.prisma  # PostgreSQL variant
-│   └── schema.sqlite.prisma     # SQLite variant
-└── server.js                     # Custom server (Hostinger compatible)
+│       └── kworbIndonesia.ts     # Indonesia-specific scraper
+├── drizzle.config.ts             # Drizzle Kit multi-dialect configuration
+├── refresh-worker.ts             # Standalone CLI refresh runner
+├── refresh-data.js               # CLI trigger script
+├── check-data.ts                 # Database status inspector
+└── server.js                     # Custom server (Hostinger LiteSpeed / Node compatible)
 ```
 
 ---
@@ -210,128 +253,48 @@ src/
 ## Data Flow
 
 ```
-Kworb.net  ──scrape──▶  Raw Track Chart Data
-                              │
-                              ▼
-                        Spotify API
-                      (cover art, URLs)
-                              │
-                              ▼
-                     statsProvider.ts
-                     (merge & enrich)
-                              │
-                              ▼
-                    Prisma / Database
-                              │
-                              ▼
-                      JSON API Routes
+Kworb.net  ──scrape (cheerio)──▶  Raw Track & Spotify Track ID
+                                       │
+                                       ▼
+                             Spotify oEmbed API
+                          (Album Cover Art & URL)
+                                       │
+                                       ▼
+                               statsProvider.ts
+                               (Merge & Enrich)
+                                       │
+                                       ▼
+                           Drizzle ORM / Database
+                        (MySQL / PostgreSQL / SQLite)
+                                       │
+                                       ▼
+                                JSON API Routes
 ```
-
-1. **Scrape**  Kworb.net is scraped for top daily tracks (by daily streams) across 20 countries
-2. **Enrich**  Each track is enriched with Spotify ID, cover art, preview URL, and Spotify link
-3. **Store**  Data is persisted to the database with daily snapshots for historical tracking
-4. **Serve**  Clean JSON APIs expose the data with filtering and country support
 
 ---
 
 ## Deployment Guide
 
-This project uses a **hybrid architecture**:
-- **GitHub Actions** handles data scraping (runs on GitHub servers, no time limits)
-- **Vercel** serves the JSON API (fast, serverless)
-- **MySQL database** stores all track data (shared between both)
+### Hybrid Setup (GitHub Actions + Vercel)
 
-### Step 1: Setup GitHub Repository
+- **GitHub Actions**: Handles daily scraping and database population.
+- **Vercel**: Serves the high-speed serverless JSON API.
+- **Database (MySQL / Postgres)**: Shared storage.
 
-1. Fork or push this repo to your GitHub account
+#### Step 1: GitHub Actions Secrets
+In your GitHub repo under **Settings → Secrets and variables → Actions**, add:
 
-2. Go to **Settings → Secrets and variables → Actions** and add these secrets:
+| Secret | Description | Example |
+|--------|-------------|---------|
+| `DATABASE_URL` | Database connection string | `mysql://user:pass@host:3306/dbname` |
+| `ADMIN_SECRET` | Secret for refresh authorization | `your_secret_string` |
+| `SCRAPE_COUNTRIES` | Countries to scrape (optional) | `global,id,my,us,gb` |
+| `TOP_TRACKS_LIMIT` | Track limit per country (optional) | `25` |
 
-   | Secret | Description | Example |
-   |--------|-------------|---------|
-   | `DATABASE_URL` | MySQL connection string | `mysql://user:pass@host:3306/dbname` |
-   | `SPOTIFY_CLIENT_ID` | Spotify app client ID | From [Spotify Dashboard](https://developer.spotify.com/dashboard) |
-   | `SPOTIFY_CLIENT_SECRET` | Spotify app client secret | From Spotify Dashboard |
-   | `SCRAPE_COUNTRIES` | Countries to scrape | `global,id,us,gb,jp,kr` |
-   | `TOP_TRACKS_LIMIT` | Max tracks per country | `25` |
-   | `ADMIN_SECRET` | (Optional) Secret for manual API refresh | Any secure string |
-
-   > **Optional:** Add `SPOTIFY_CLIENT_ID_2`, `SPOTIFY_CLIENT_SECRET_2`, etc. for rate limit rotation
-
-3. Make sure your MySQL database is accessible from GitHub Actions (public endpoint or allowlisted IPs)
-
-### Step 2: First Data Refresh
-
-Run the workflow manually to populate your database for the first time:
-
-1. Go to **Actions** tab in your GitHub repo
-2. Click **"Daily Stats Refresh"** workflow on the left
-3. Click **"Run workflow"** → **"Run workflow"** (green button)
-4. Wait for it to complete (~2-5 minutes)
-
-This will scrape all configured countries and store track data in your database.
-
-### Step 3: Deploy API to Vercel
-
-1. Import your GitHub repo on [vercel.com/new](https://vercel.com/new)
-
-2. Add the same environment variables in Vercel dashboard:
-   - `DATABASE_URL`
-   - `SPOTIFY_CLIENT_ID`
-   - `SPOTIFY_CLIENT_SECRET`
-   - `ADMIN_SECRET`
-
-3. Deploy! Your API is now live at `https://your-project.vercel.app`
-
-### Step 4: Done! 🎉
-
-After the initial setup:
-- **GitHub Actions** automatically refreshes data **twice daily** at 06:00 and 18:00 UTC (configurable in `.github/workflows/refresh-cron.yml`)
-- **Vercel** serves fresh data from the database via API routes
-- You can trigger a manual refresh anytime from the GitHub Actions tab
-
-### Architecture Diagram
-
-```
-┌─────────────────────────────────┐
-│        GitHub Actions           │
-│   (cron: 06:00 & 18:00 UTC)    │
-│                                 │
-│  1. Scrape Kworb.net            │
-│  2. Enrich via Spotify API      │
-│  3. Write to MySQL              │
-└──────────────┬──────────────────┘
-               │ writes
-               ▼
-┌─────────────────────────────────┐
-│         MySQL Database          │
-│   TrackCurrent + TrackSnapshot  │
-└──────────────┬──────────────────┘
-               │ reads
-               ▼
-┌─────────────────────────────────┐
-│        Vercel (API)             │
-│                                 │
-│  /api/stats/tracks              │
-│  /api/stats/tracks/history      │
-│  /api/stats/countries           │
-│  /api/stats/last-updated        │
-└──────────────┬──────────────────┘
-               │
-               ▼
-         Discord Bot / Client
-```
-
-### Cron Schedule
-
-Edit `.github/workflows/refresh-cron.yml` to change the refresh schedule:
-
-```yaml
-schedule:
-  - cron: '0 6,18 * * *'  # 06:00 & 18:00 UTC (13:00 & 01:00 WIB)
-```
-
-You can also trigger manually: **Actions → Daily Stats Refresh → Run workflow**
+#### Step 2: Deploy to Vercel
+1. Import repo on [vercel.com](https://vercel.com).
+2. Set `DATABASE_URL` and `ADMIN_SECRET` in Vercel environment variables.
+3. Deploy!
 
 ---
 
@@ -340,46 +303,19 @@ You can also trigger manually: **Actions → Daily Stats Refresh → Run workflo
 | Code | Country | Code | Country |
 |------|---------|------|---------|
 | `global` | 🌍 Global | `kr` | 🇰🇷 South Korea |
-| `us` | 🇺🇸 United States | `in` | 🇮🇳 India |
-| `gb` | 🇬🇧 United Kingdom | `au` | 🇦🇺 Australia |
-| `id` | 🇮🇩 Indonesia | `es` | 🇪🇸 Spain |
-| `jp` | 🇯🇵 Japan | `it` | 🇮🇹 Italy |
-| `de` | 🇩🇪 Germany | `ca` | 🇨🇦 Canada |
-| `fr` | 🇫🇷 France | `se` | 🇸🇪 Sweden |
-| `br` | 🇧🇷 Brazil | `ph` | 🇵🇭 Philippines |
-| `mx` | 🇲🇽 Mexico | `tr` | 🇹🇷 Turkey |
-| `nl` | 🇳🇱 Netherlands | `ar` | 🇦🇷 Argentina |
-
----
-
-## Alternative Deployment
-
-### Hostinger / Custom Node.js
-
-```bash
-npm run build
-node server.js
-```
-
-The custom `server.js` includes `.htaccess` self-healing for Apache-based hosting (LiteSpeed/Hostinger).
-
----
-
-## Scripts
-
-| Script | Description |
-|--------|-------------|
-| `npm run dev` | Start development server |
-| `npm run build` | Build for production |
-| `npm start` | Start production server |
-| `npm run lint` | Run ESLint |
-| `npm run db:push` | Push Prisma schema to database |
-| `npm run db:studio` | Open Prisma Studio |
-| `node refresh-data.js` | Manual data refresh |
-| `node check-data.js` | Check data counts in database |
+| `id` | 🇮🇩 Indonesia | `in` | 🇮🇳 India |
+| `my` | 🇲🇾 Malaysia | `au` | 🇦🇺 Australia |
+| `us` | 🇺🇸 United States | `es` | 🇪🇸 Spain |
+| `gb` | 🇬🇧 United Kingdom | `it` | 🇮🇹 Italy |
+| `jp` | 🇯🇵 Japan | `ca` | 🇨🇦 Canada |
+| `de` | 🇩🇪 Germany | `se` | 🇸🇪 Sweden |
+| `fr` | 🇫🇷 France | `ph` | 🇵🇭 Philippines |
+| `br` | 🇧🇷 Brazil | `tr` | 🇹🇷 Turkey |
+| `mx` | 🇲🇽 Mexico | `ar` | 🇦🇷 Argentina |
+| `nl` | 🇳🇱 Netherlands | | |
 
 ---
 
 ## License
 
-This project is for personal/educational use.
+MIT License. For educational and personal use.
